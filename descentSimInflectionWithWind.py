@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import math as mt
 import pandas as pd
 from tqdm import tqdm
-
+from windFit import characterizeWind
 # %% Determining Air Density
 def rho(alt):
     alt = alt/m2ft #Convert to meters
@@ -167,13 +167,12 @@ def energy_sim(z, t, dt, descentRateMean, actualAoA):
         powerCons = np.interp(actualAoA[i], xp, fp)
 
         if descentRateMean>-50:
-            pwrMultAir = mt.sqrt(rho(z[i])/rho(endAlt))
-            pwrMultWeight = ((Mt*-g)**(3/2))/((Mact*-g)**(3/2))
+            pwrMult = (Mt**(3/2)*rhoAct**(1/2))/(Mact**(3/2)*rho(i)**(1/2))
+
         else:
-            pwrMultAir = 1
-            pwrMultWeight = 1
+            pwrMult=1
             
-        energy = np.append(energy, energy[i-1] + (powerCons*pwrMultAir*pwrMultWeight*dt/3600))
+        energy = np.append(energy, energy[i-1] + (powerCons*pwrMult*dt/3600))
         
     if descentRateMean<-50:
         flipMult = (((1.5*Mt*-g)**(3/2))/((1.5*Mact*-g)**(3/2)))
@@ -210,20 +209,19 @@ Mb = 0.47 #mass of battery
 Mp = 0#np.linspace(0,5,num=20)#0 #mass of payload
 
 Mact = 2.66 #mass of actual drone used for testing
+altSwope = 758 #Altitude of swope park (feet)
+rhoAct = rho(altSwope) #Density of air at actual test altitude
 battEnergyMax = 34.04 #Maximum battery capacity (Wh)
 ft2mile = 5280 #conversion for foot to miles
 
 startx = 0
 starty = 0
 
-xGoalArray = np.linspace(1,14000,num=20)
+xGoalArray = np.linspace(1,18000,num=10)
 yGoal = 0.01
-eInv = []
-eSlow = []
-eMedium = []
-eFast = []
 
-airdensity = rho(909)
+allTypes, type1, type2, type3 = characterizeWind()
+
 # %%
 ####################################
 ##### Main Simulation/Program ######
@@ -231,116 +229,108 @@ airdensity = rho(909)
 # fig1 = plt.figure(1)
 # ax = fig1.add_subplot(111,projection='3d')
 
-location =  r'C:\Users\Sean\Box\Scripts\Balloon Wind Files\8_matlab_asc.csv'
-real_wind = pd.read_csv(location)
-real_wind = real_wind.to_numpy()
-wind_alt = real_wind[:,0]*m2ft #MSL altitude (ft)
-wind_x = real_wind[:,1]*m2ft #ft/s
-wind_y = real_wind[:,2]*m2ft #ft/s
-
-location =  r'C:\Users\Sean\Box\Scripts\Balloon Wind Files\9_matlab_asc.csv'
-pred_wind = pd.read_csv(location)
-pred_wind = pred_wind.to_numpy()
-pwind_alt = pred_wind[:,0]*m2ft #MSL altitude (ft)
-pwind_x = pred_wind[:,1]*m2ft #ft/s
-pwind_y = pred_wind[:,2]*m2ft #ft/s
-
-for k in tqdm(range(len(xGoalArray))):
-    Mt = Md + Mb + Mp #total mass with battery (lbs)
-    xGoal = xGoalArray[k]
-    looksGood = 0
-    # fig1 = plt.figure(1)
-    # ax = fig1.add_subplot(111,projection='3d')
-    for i in range(len(descentRateMean)):
-        #print(descentRateMean[i])
-        z,zd,zdd,t = z_sim(startAlt, endAlt, dt, Mt, CdA, descentRateMean[i]) # Run z (altitude) simulation
-        x_sim, y_sim, desAngle = xy_descent_sim(z, zd, t, dt, xGoal, yGoal, descentRateMean[i], wind_alt, wind_x, wind_y, pwind_alt, pwind_x, pwind_y)
-        energyCons = energy_sim(z, t, dt, descentRateMean[i], desAngle)
+for p in tqdm(range(3)):
+    windType = allTypes[p]
+    eInvSum = np.zeros(len(xGoalArray))
+    eSlowSum = np.zeros(len(xGoalArray))
+    eMediumSum = np.zeros(len(xGoalArray))
+    eFastSum = np.zeros(len(xGoalArray))
+    for w in tqdm(range(len(windType))):
+        eInv = []
+        eSlow = []
+        eMedium = []
+        eFast = []
+        location1 =  r'C:\Users\stw2nf\Box\Scripts\Renamed Balloon Files\wind'+str(int(windType[w,0]))+'.csv'
+        real_wind = pd.read_csv(location1)
+        real_wind = real_wind.to_numpy()
+        wind_alt = real_wind[:,0]*m2ft #MSL altitude (ft)
+        wind_x = real_wind[:,1]*m2ft #ft/s
+        wind_y = real_wind[:,2]*m2ft #ft/s
         
-        totalDescentEnergy[i] = energyCons[-1] #Energy consumed during descent (Whr)
-        d2Grnd[i] = (x_sim[-1]**2 + y_sim[-1]**2)**(1/2)/ft2mile #Distance travelled in descent (ft)
-        t2Grnd[i] = t[-1]/60 #Time to ground (mins)
-        totalEnergy[i] = energyCons[-1]
-        d2Goal = ((xGoal-x_sim[-1])**2 + (yGoal-y_sim[-1])**2)**(1/2)
+        location2 =  r'C:\Users\stw2nf\Box\Scripts\Renamed Balloon Files\wind'+str(int(windType[w,1]))+'.csv'
+        pred_wind = pd.read_csv(location2)
+        pred_wind = pred_wind.to_numpy()
+        pwind_alt = pred_wind[:,0]*m2ft #MSL altitude (ft)
+        pwind_x = pred_wind[:,1]*m2ft #ft/s
+        pwind_y = pred_wind[:,2]*m2ft #ft/s
         
-        while ( d2Goal > (transSpeed*dt)) :
-            
-            thetaGoal = np.arctan2((yGoal-y_sim[-1]), (xGoal-x_sim[-1]))
-        
-            transSpeed_x = transSpeed*np.cos(thetaGoal)
-            transSpeed_y = transSpeed*np.sin(thetaGoal)
-            
-            wind_act_x = np.interp(z[-1], wind_alt, wind_x)
-            wind_act_y = np.interp(z[-1], wind_alt, wind_y)
-        
-            x_sim = np.append(x_sim, (x_sim[-1] + ((transSpeed_x + wind_act_x)*dt)))
-            y_sim = np.append(y_sim, (y_sim[-1] + ((transSpeed_y + wind_act_y)*dt)))
-            
-            d2Goal = ((xGoal-x_sim[-1])**2 + (yGoal-y_sim[-1])**2)**(1/2)
-            
-            #print(distance[-1])
-            t = np.append(t, (t[-1] + dt) )# Simple, but sticking in here for convenience
-            z = np.append(z, endAlt)
-            zd = np.append(zd, 0)
-            zdd = np.append(zdd, 0)
-            
-            pwrMultWeight = ((Mt*-g)**(3/2))/((Mact*-g)**(3/2))
-            energyCons = np.append(energyCons, (energyCons[-1] + (pwrMultWeight*transPower*dt/3600)))
-            
-        totalEnergy[i] = energyCons[-1]       
-        
-        if (descentRateMean[i] == -5):
-            eSlow = np.append(eSlow,energyCons[-1])
-            
-        if (descentRateMean[i] == -10):
-            eMedium = np.append(eMedium,energyCons[-1])
-            
-        if (descentRateMean[i] == -15):
-            eFast = np.append(eFast,energyCons[-1])
-            
-        if (descentRateMean[i] == -58):
-            eInv = np.append(eInv,energyCons[-1])
+        for k in range(len(xGoalArray)):
+            Mt = Md + Mb + Mp #total mass with battery (lbs)
+            xGoal = xGoalArray[k]
     
-    #     x_sim = np.append(x_sim, xGoal)
-    #     y_sim = np.append(y_sim, yGoal)
-    #     ax.plot3D(x_sim, y_sim, z, alpha=0.5, linewidth=1, label=legendValue[i])
-    #     ax.set_xlabel('X Distance (ft)')
-    #     ax.set_ylabel('Y Distance (ft)')
-    #     ax.set_zlabel('Altitude (ft)')
-    #     ax.set_title('Method of Descent Comparison')
-    
-    # print('Enter any key to move on')
-    # while looksGood == 0:
-    #     looksGood = input()
-    
-    # plt.close()
-        
-    if (eInv[-1]>eSlow[-1]) or (eInv[-1]>eMedium[-1]) or (eInv[-1]>eFast[-1]):
-            break
-#     # %% Plotting Results
-#     for j in range(len(angle)):
-        
-#         if j == 0:
-#             ax.plot3D(np.cos(angle[j])*distance/ft2mile, np.sin(angle[j])*distance/ft2mile, z/ft2mile, plotColors[i], alpha=0.5, linewidth=1, label=legendValue[i])
-#         else:
-#             ax.plot3D(np.cos(angle[j])*distance/ft2mile, np.sin(angle[j])*distance/ft2mile, z/ft2mile, plotColors[i], alpha=0.5, linewidth=1)
+            for i in range(len(descentRateMean)):
+                #print(descentRateMean[i])
+                z,zd,zdd,t = z_sim(startAlt, endAlt, dt, Mt, CdA, descentRateMean[i]) # Run z (altitude) simulation
+                x_sim, y_sim, desAngle = xy_descent_sim(z, zd, t, dt, xGoal, yGoal, descentRateMean[i], wind_alt, wind_x, wind_y, pwind_alt, pwind_x, pwind_y)
+                energyCons = energy_sim(z, t, dt, descentRateMean[i], desAngle)
+                
+                totalDescentEnergy[i] = energyCons[-1] #Energy consumed during descent (Whr)
+                d2Grnd[i] = (x_sim[-1]**2 + y_sim[-1]**2)**(1/2)/ft2mile #Distance travelled in descent (ft)
+                t2Grnd[i] = t[-1]/60 #Time to ground (mins)
+                totalEnergy[i] = energyCons[-1]
+                d2Goal = ((xGoal-x_sim[-1])**2 + (yGoal-y_sim[-1])**2)**(1/2)
+                
+                while ( d2Goal > (transSpeed*dt)) :
+                    
+                    thetaGoal = np.arctan2((yGoal-y_sim[-1]), (xGoal-x_sim[-1]))
+                
+                    transSpeed_x = transSpeed*np.cos(thetaGoal)
+                    transSpeed_y = transSpeed*np.sin(thetaGoal)
+                    
+                    wind_act_x = np.interp(z[-1], wind_alt, wind_x)
+                    wind_act_y = np.interp(z[-1], wind_alt, wind_y)
+                
+                    x_sim = np.append(x_sim, (x_sim[-1] + ((transSpeed_x + wind_act_x)*dt)))
+                    y_sim = np.append(y_sim, (y_sim[-1] + ((transSpeed_y + wind_act_y)*dt)))
+                    
+                    d2Goal = ((xGoal-x_sim[-1])**2 + (yGoal-y_sim[-1])**2)**(1/2)
+                    
+                    #print(distance[-1])
+                    t = np.append(t, (t[-1] + dt) )# Simple, but sticking in here for convenience
+                    z = np.append(z, endAlt)
+                    zd = np.append(zd, 0)
+                    zdd = np.append(zdd, 0)
+                    
+                    pwrMult = (Mt**(3/2)*rhoAct**(1/2))/(Mact**(3/2)*rho(i)**(1/2))
+                    energyCons = np.append(energyCons, (energyCons[-1] + (pwrMult*transPower*dt/3600)))
+                    
+                totalEnergy[i] = energyCons[-1]       
+                
+                if (descentRateMean[i] == -5):
+                    eSlow = np.append(eSlow,energyCons[-1])
+                    
+                if (descentRateMean[i] == -10):
+                    eMedium = np.append(eMedium,energyCons[-1])
+                    
+                if (descentRateMean[i] == -15):
+                    eFast = np.append(eFast,energyCons[-1])
+                    
+                if (descentRateMean[i] == -58):
+                    eInv = np.append(eInv,energyCons[-1])
             
-#         ax.set_xlabel('X Distance (miles)')
-#         ax.set_ylabel('Y Distance (miles)')
-#         ax.set_zlabel('Altitude (miles)')
-#         ax.set_title('Method of Descent Comparison')
-
-fig1 = plt.figure(1)
-plt.plot(xGoalArray[0:len(eInv)], eInv, linewidth=1, label=legendValue[0])
-plt.plot(xGoalArray[0:len(eSlow)], eSlow, linewidth=1, label=legendValue[3])
-plt.plot(xGoalArray[0:len(eMedium)], eMedium, linewidth=1, label=legendValue[2])
-plt.plot(xGoalArray[0:len(eFast)], eFast, linewidth=1, label=legendValue[1])
-plt.hlines(battEnergyMax, 0, max(xGoalArray), linestyle='dashed', label='Battery Capacity')
-plt.xlabel('Standoff Distance (ft)')
-plt.ylabel('Energy (Wh)')
-plt.title('Method of Descent Comparison\n(10,000 AGL Drop)')
-plt.grid(which='both', axis='both', color='k', linestyle='-', linewidth=.2)
-fig1.legend()
+        eInvSum = np.add(eInvSum,eInv)
+        eSlowSum = np.add(eSlowSum,eSlow)
+        eMediumSum = np.add(eMediumSum,eMedium)
+        eFastSum = np.add(eFastSum,eFast)
+    
+    n = len(windType)
+    eInvMean = eInvSum/n
+    eSlowMean = eSlowSum/n
+    eMediumMean = eMediumSum/n
+    eFastMean = eFastSum/n
+    
+    # %% Plotting Results
+    fig = plt.figure(p+1)
+    plt.plot(xGoalArray[0:len(eInv)], eInvMean, linewidth=1, label=legendValue[0])
+    plt.plot(xGoalArray[0:len(eSlow)], eSlowMean, linewidth=1, label=legendValue[3])
+    plt.plot(xGoalArray[0:len(eMedium)], eMediumMean, linewidth=1, label=legendValue[2])
+    plt.plot(xGoalArray[0:len(eFast)], eFastMean, linewidth=1, label=legendValue[1])
+    plt.hlines(battEnergyMax, 0, max(xGoalArray), linestyle='dashed', label='Battery Capacity')
+    plt.xlabel('Standoff Distance (ft)')
+    plt.ylabel('Energy (Wh)')
+    plt.title('Method of Descent Comparison\n(10,000 AGL Drop) For Type {} Wind Prediction'.format(p+1))
+    plt.grid(which='both', axis='both', color='k', linestyle='-', linewidth=.2)
+    fig.legend()
 
 # fig1 = plt.figure(1)
 # plt.plot(Mp[0:len(eInv)], eInv, linewidth=1, label=legendValue[0])
@@ -353,6 +343,7 @@ fig1.legend()
 # plt.title('Method of Descent Comparison\n(10,000 AGL Drop, 0 ft Standoff)')
 # plt.grid(which='both', axis='both', color='k', linestyle='-', linewidth=.2)
 # fig1.legend()
+
 # fig1 = plt.figure(1)
 # plt.plot(xGoal[0:len(eInv)], eInv, linewidth=1, label=legendValue[0])
 # plt.plot(xGoal[0:len(eSlow)], eSlow, linewidth=1, label=legendValue[1])
@@ -363,32 +354,6 @@ fig1.legend()
 # plt.title('Method of Descent Comparison')
 # plt.grid(which='both', axis='both', color='k', linestyle='-', linewidth=.2)
 # fig1.legend() 
-
-#     fig3 = plt.figure(3)
-#     plt.plot(t,zd, plotColors[i], alpha=0.9, linewidth=1, label=legendValue[i])
-#     plt.xlabel('Time, s')
-#     plt.ylabel('Descent Rate, ft/s')
-#     plt.title('Descent Rate Comparison')
-#     plt.grid(which='both', axis='both', color='k', linestyle='-', linewidth=.2)
-    
-# for i in range(len(dfinal)):
-#     fig4 = plt.figure(4)
-#     rad = dfinal[i]
-#     theta = np.linspace(0, 2*np.pi, 100)
-#     a = rad*np.cos(theta)
-#     b = rad*np.sin(theta)
-#     plt.plot(a,b,plotColors[i],alpha=0.9,linewidth=1,label=legendValue[i])
-#     plt.xlabel('X (miles)')
-#     plt.ylabel('Y (miles)')
-#     plt.title('Maximum Operating Window')
-#     plt.grid(which='both', axis='both', color='k', linestyle='-', linewidth=.2)
     
 # fig1.legend()
-# fig2.legend()
-# fig3.legend()
-# fig4.legend()
 
-#%% Formatting Results for Tables
-# descentParameters = np.array([legendValue, np.around(descentRateMean,2), np.around(powerCons,2), np.around(glideRatio,2)]).T
-# environmentParameters = np.array([startAlt, endAlt, transSpeed, transPower, Mt, CdA, flipEnergy]).T
-# simResults = np.array([legendValue, np.around(t2Grnd,2), np.around(d2Grnd,2), np.around(totalDescentEnergy,2), np.around(dfinal,2)]).T
